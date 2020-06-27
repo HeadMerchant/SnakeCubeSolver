@@ -1,7 +1,9 @@
 import * as THREE from 'https://unpkg.com/three@0.118.1/build/three.module.js';
 import { OrbitControls } from 'https://unpkg.com/three@0.118.1/examples/jsm/controls/OrbitControls.js';
 
+const halfPi = Math.PI * 0.5;
 const vec3 = THREE.Vector3;
+vec3.prototype.toString = function(){return `${this.x}, ${this.y}, ${this.z}`;}
 var scene = new THREE.Scene();
 var camera = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 0.1, 1000 );
 
@@ -50,7 +52,8 @@ const cubeSolver = {
     segmentIndex: 0,
     pos: new vec3(0),
     segments: [
-        3,
+        1,
+        2,
         1,
         1,
         2,
@@ -141,6 +144,28 @@ const cubeSolver = {
         let v = getOrtho(dir);
         dir.set(v.x, v.y, v.z);
         return i;
+    },
+    *placeIter(segmentIndex, index, pos, dir, parentDir){
+        let segment = this.segments[segmentIndex];
+        console.log("placing");
+        do{
+            var i = index;
+            var newPos = pos.clone();
+            dir.applyAxisAngle(parentDir, halfPi).round();
+            console.log(`Going again ${dir}`);
+            for(; i < segment+index; i++){
+                newPos.add(dir);
+                console.log(`Adding cube ${i}; max is ${segment} at ${newPos}`);
+                let cube = this.cubes[i];
+                cube.position.set(newPos.x, newPos.y, newPos.z);
+                cube.visible = true;
+            }
+        }while(!(yield null))
+        console.log(`Placed ${i} against ${this.totalCubes}`);
+        if(i < this.totalCubes){
+            //Recursive pausing
+            yield* this.placeIter(segmentIndex+1, i, newPos, getOrtho(dir), dir);
+        }
     }
 }
 
@@ -152,12 +177,15 @@ cubeSolver.makeCubeOfCubes();
 const deltaT = 0.5;
 let nextTime = 0;
 
-pos = new vec3(0, 0, 0);
 dir = new vec3(1, 0, 0);
+pos = dir.clone().negate();
 
 let segmentIndex = 0,
     cubeIndex = 0;
-cubeIndex = cubeSolver.drawSegment(segmentIndex, cubeIndex);
+let placement = cubeSolver.placeIter(0, 0, pos, dir, new vec3(0, 1, 0));
+placement.next(true);
+placement.next(true);
+// cubeIndex = cubeSolver.drawSegment(segmentIndex, cubeIndex);
 // cubeIndex = cubeSolver.addSegment(segmentIndex, 0, pos, dir);
 segmentIndex++;
 
@@ -165,26 +193,20 @@ segmentIndex++;
 let showNext = false;
 
 //HTML
-document.getElementById('next').onclick = () => showNext = true;
+document.getElementById('next').onclick = () => placement.next(true);//showNext = true;
+document.getElementById('rotate').onclick = () => placement.next(false);
 
 function animate( now ) {
     now *= 0.001;
-    // console.log(now);
-    // if(now > nextTime && i < cubes.length){
-    //     console.log(`Drawing ${seg}; Currently ${i} cubes`);
+
+    // if(showNext && cubeIndex < cubeSolver.totalCubes){
+    //     // console.log(`Drawing ${segmentIndex}; Currently ${cubeIndex} cubes`);
     //     nextTime += deltaT;
-    //     i = drawSegment(segments[seg], i, pos, pos);
-    //     seg++;
+    //     // cubeIndex = cubeSolver.addSegment(segmentIndex, cubeIndex, pos, dir);
+    //     cubeIndex = cubeSolver.drawSegment(segmentIndex, cubeIndex);
+    //     segmentIndex++;
+    //     showNext = false;
     // }
-    // now > nextTime
-    if(showNext && cubeIndex < cubeSolver.totalCubes){
-        // console.log(`Drawing ${segmentIndex}; Currently ${cubeIndex} cubes`);
-        nextTime += deltaT;
-        // cubeIndex = cubeSolver.addSegment(segmentIndex, cubeIndex, pos, dir);
-        cubeIndex = cubeSolver.drawSegment(segmentIndex, cubeIndex);
-        segmentIndex++;
-        showNext = false;
-    }
     // if(time.elapsedTime > )
     // console.log(`now: ${now}`);
     renderer.render( scene, camera );
