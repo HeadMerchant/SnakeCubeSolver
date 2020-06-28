@@ -1,8 +1,8 @@
-import * as THREE from 'https://unpkg.com/three@0.118.1/build/three.module.js';
-import { OrbitControls } from 'https://unpkg.com/three@0.118.1/examples/jsm/controls/OrbitControls.js';
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 const halfPi = Math.PI * 0.5;
-const vec3 = THREE.Vector3;
+import vec3 = THREE.Vector3;
 vec3.prototype.toString = function(){return `${this.x}, ${this.y}, ${this.z}`;}
 var scene = new THREE.Scene();
 var camera = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 0.1, 1000 );
@@ -27,14 +27,14 @@ scene.add(amb);
 scene.add(point);
 // scene.add(p2);
 
-function getOrtho(v){
+function getOrtho(v: vec3): vec3{
     // return new vec3(v.z, v.z, -v.x-v.y); //Doesn't work if v || (1, -1, 0)
     // This also works for our purposes:
     return new vec3(v.y, v.z, v.x);//v.xyz = v.yzx
 }
 //Cube stuff
 var geometry = new THREE.BoxGeometry();
-var mat1 = new THREE.MeshLambertMaterial( { color: 0xffcc00  } ),
+var mat1 = new THREE.MeshBasicMaterial( { color: 0xffcc00  } ),
     mat2 = new THREE.MeshBasicMaterial( { color: 0x00ffab});//0x00ccff } );            
 
 camera.position.z = 5;
@@ -75,7 +75,7 @@ const cubeSolver = {
         2
     ],
     spatialSet: [],
-    initCubes(){
+    initCubes(): void{
         var j = 0;
         for(const i of this.segments){
             for(const k of Array(i).keys()){
@@ -92,14 +92,14 @@ const cubeSolver = {
         this.spatialSet = new Array(bounds.x*bounds.y*bounds.z).fill(false);
         this.bounds = bounds;
     },
-    makeCubeOfCubes(){
+    makeCubeOfCubes(): void{
         let i = 0;
         for(let cube of this.cubes){
             cube.position.set(i % 3 - 1, Math.floor((i % 9) / 3) - 1, Math.floor(i / 9) - 1);
             i++;
         }
     },
-    drawSegment(segment, index, visible = true){
+    drawSegment(segment: number, index: number, visible = true): number{
         segment = this.segments[segment];
         let i = index;
         for(; i < segment+index; i++){
@@ -110,12 +110,12 @@ const cubeSolver = {
         }
         return i;
     },
-    hideCubes(){
+    hideCubes(): void{
         for(let cube of this.cubes){
             cube.visible = false;
         }
     },
-    extend(){
+    extend(): void{
         var pos = new vec3(0),
             dir = new vec3(1, 0, 0),
             up = new vec3();
@@ -138,7 +138,7 @@ const cubeSolver = {
             j++;
         }
     },
-    addSegment(segmentIndex, index, pos, dir){
+    addSegment(segmentIndex: number, index: number, pos:vec3, dir:vec3): number{
         let segment = this.segments[segmentIndex];
         let i = index;
         for(; i < segment+index; i++){
@@ -153,13 +153,14 @@ const cubeSolver = {
         dir.set(v.x, v.y, v.z);
         return i;
     },
-    *placeIter(segmentIndex, index, pos, dir, parentDir){
+    *placeIter(segmentIndex: number, index: number, pos: vec3, parentDir: vec3): Generator<void, void, boolean>{
         let segment = this.segments[segmentIndex];
         console.log("placing");
+        let dir: vec3 = getOrtho(parentDir);
         do{
             var i = index;
             var newPos = pos.clone();
-            dir.applyAxisAngle(parentDir, halfPi).round();
+            dir.crossVectors(dir, parentDir);
             console.log(`Going again ${dir}`);
             for(; i < segment+index; i++){
                 newPos.add(dir);
@@ -172,19 +173,41 @@ const cubeSolver = {
         console.log(`Placed ${i} against ${this.totalCubes}`);
         if(i < this.totalCubes){
             //Recursive pausing
-            yield* this.placeIter(segmentIndex+1, i, newPos, getOrtho(dir), dir);
+            yield* this.placeIter(segmentIndex+1, i, newPos, dir);
         }
     },
-    toSpatial(v){
+    toSpatial(v: vec3): number{
+        let b = this.bounds;
         return v.x + b.x * (v.y + b.z * v.z);
     },
-    setSpatial(v, val){
+    setSpatial(v: vec3, val: boolean) : void{
         let b = this.bounds;
         this.spatialSet[v.x + b.x * (v.y + b.z * v.z)] = val;
     },
-    *solveIter(segmentIndex, index, pos, dir, parentDir, spatialSet, min, max, cubes){
+    *solveIter(segmentIndex, index, pos, parentDir, spatialSet, min, max, cubes){
         let segment = this.segments[segmentIndex];
         let setIndices = new Array(segment); //Indices in spatialSet used during placement
+        console.log("placing");
+        let dir: vec3 = getOrtho(parentDir);
+        do{
+            var i = index;
+            var newPos = pos.clone();
+            dir.crossVectors(dir, parentDir);
+            console.log(`Going again ${dir}`);
+            for(; i < segment+index; i++){
+                newPos.add(dir);
+                console.log(`Adding cube ${i}; max is ${segment} at ${newPos}`);
+                let cube = this.cubes[i];
+                cube.position.set(newPos.x, newPos.y, newPos.z);
+                cube.visible = true;
+            }
+        }while(!(yield null))
+        console.log(`Placed ${i} against ${this.totalCubes}`);
+        if(i < this.totalCubes){
+            //Recursive pausing
+            yield* this.placeIter(segmentIndex+1, i, newPos, dir);
+        }
+
         console.log("placing");
         do{
             var i = index;
@@ -221,7 +244,7 @@ pos = dir.clone().negate();
 
 let segmentIndex = 0,
     cubeIndex = 0;
-let placement = cubeSolver.placeIter(0, 0, pos, dir, new vec3(0, 1, 0));
+let placement = cubeSolver.placeIter(0, 0, pos, new vec3(0, 1, 0));
 placement.next(true);
 placement.next(true);
 // cubeIndex = cubeSolver.drawSegment(segmentIndex, cubeIndex);

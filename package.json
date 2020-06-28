@@ -1,0 +1,29 @@
+{
+    "sideEffects": "false",
+    "version": "1.0.0",
+    "description": "I got a puzzle cube in September of 2019 that I couldn't solve. Seeing some friends solve it in minutes made me mad, so here's a solver for it. Appparently these are called snake cubes.",
+    "main": "index.js",
+    "scripts": {
+        "watch": "webpack --watch"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/HeadMerchant/SnakeCubeSolver.git"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "bugs": {
+        "url": "https://github.com/HeadMerchant/SnakeCubeSolver/issues"
+    },
+    "homepage": "https://github.com/HeadMerchant/SnakeCubeSolver#readme",
+    "devDependencies": {
+        "ts-loader": "^7.0.5",
+        "typescript": "^3.9.5",
+        "webpack": "^4.43.0",
+        "webpack-cli": "^3.3.12"
+    },
+    "dependencies": {
+        "three": "^0.118.3"
+    }
+}
