@@ -51,6 +51,9 @@ const cubeSolver = {
     totalCubes: 0,
     segmentIndex: 0,
     pos: new vec3(0),
+    max: new vec3(2, 2, 2),
+    min: new vec3(0, 0, 0),
+    bounds: 0,
     segments: [
         1,
         2,
@@ -71,6 +74,7 @@ const cubeSolver = {
         2,
         2
     ],
+    spatialSet: [],
     initCubes(){
         var j = 0;
         for(const i of this.segments){
@@ -83,6 +87,10 @@ const cubeSolver = {
             }
         }
         this.totalCubes = j;
+
+        let bounds = this.max.clone().sub(this.min);
+        this.spatialSet = new Array(bounds.x*bounds.y*bounds.z).fill(false);
+        this.bounds = bounds;
     },
     makeCubeOfCubes(){
         let i = 0;
@@ -166,7 +174,38 @@ const cubeSolver = {
             //Recursive pausing
             yield* this.placeIter(segmentIndex+1, i, newPos, getOrtho(dir), dir);
         }
+    },
+    toSpatial(v){
+        return v.x + b.x * (v.y + b.z * v.z);
+    },
+    setSpatial(v, val){
+        let b = this.bounds;
+        this.spatialSet[v.x + b.x * (v.y + b.z * v.z)] = val;
+    },
+    *solveIter(segmentIndex, index, pos, dir, parentDir, spatialSet, min, max, cubes){
+        let segment = this.segments[segmentIndex];
+        let setIndices = new Array(segment); //Indices in spatialSet used during placement
+        console.log("placing");
+        do{
+            var i = index;
+            var newPos = pos.clone();
+            dir.applyAxisAngle(parentDir, halfPi).round();
+            console.log(`Going again ${dir}`);
+            for(; i < segment+index; i++){
+                newPos.add(dir);
+                console.log(`Adding cube ${i}; max is ${segment} at ${newPos}`);
+                let cube = this.cubes[i];
+                cube.position.set(newPos.x, newPos.y, newPos.z);
+                cube.visible = true;
+            }
+        }while(!(yield null))
+        console.log(`Placed ${i} against ${this.totalCubes}`);
+        if(i < this.totalCubes){
+            //Recursive pausing
+            yield* this.placeIter(segmentIndex+1, i, newPos, getOrtho(dir), dir);
+        }
     }
+
 }
 
 cubeSolver.initCubes();
