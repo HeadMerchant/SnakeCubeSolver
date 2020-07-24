@@ -1,76 +1,79 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-
-const halfPi = Math.PI * 0.5;
 import vec3 = THREE.Vector3;
-import { Object3D, QuadraticBezierCurve, Quaternion, OneMinusDstAlphaFactor, Matrix4 } from 'three';
-vec3.prototype.toString = function(){return `${this.x}, ${this.y}, ${this.z}`;}
+import { CubeCamera, Vector3, OneMinusDstAlphaFactor } from 'three';
+
+const DOWN = new vec3(0,-1,0);
+const halfPi = Math.PI * 0.5;
+const TEMP_V = new vec3();
+const TEMP_M = new THREE.Matrix4();
+vec3.prototype.toString = function(){return `${this.x},${this.y},${this.z}`;}
 var scene = new THREE.Scene();
 var camera = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 0.1, 1000 );
+camera.rotateX(halfPi);
+// camera.rotateZ(-halfPi);
+camera.translateZ(-5);
 
 var renderer = new THREE.WebGLRenderer({antialias: true});
 renderer.setSize( window.innerWidth, window.innerHeight );
 renderer.setClearColor("#38e");
 document.body.appendChild( renderer.domElement );
-
-var controls = new OrbitControls(camera, renderer.domElement);
-
-//Lightingvar i = 0;
-var pos = new vec3(0),
-    dir = new vec3(1, 0, 0),
-    up = new vec3(0, 1, 0);
-var amb = new THREE.AmbientLight(0x656e77),
-    point = new THREE.DirectionalLight(0xffffff, 0.5);
-    // p2 = new THREE.DirectionalLight(0xffffff, 0.5);
-point.position.set(.2, 1, .5);
-// p2.position.set(0, -1, 0);
-scene.add(amb);
-scene.add(point);
-// scene.add(p2);
-var grid = new THREE.GridHelper(10, 10);
-scene.add(grid);
-
-function getOrtho(v: vec3): vec3{
-    // return new vec3(v.z, v.z, -v.x-v.y); //Doesn't work if v || (1, -1, 0)
-    // This also works for our purposes:
-    return new vec3(v.y, v.z, v.x);//v.xyz = v.yzx
-}
-let orthoAxis = new vec3(1,1,1).normalize();
-//Cube stuff
-var geometry = new THREE.BoxGeometry(.98, .98, .98);
-var mat1 = new THREE.MeshLambertMaterial( { color: 0xffcc00  } ),
-    mat2 = new THREE.MeshLambertMaterial( { color: 0x00ffab});//0x00ccff } );            
-
-camera.position.z = 5;
-
 window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
 });
 
+var orbitControls = new OrbitControls(camera, renderer.domElement);
+
+//Lighting
+var amb = new THREE.AmbientLight(0x656e77),
+    point = new THREE.DirectionalLight(0xffffff, 0.5);
+point.position.set(.2, 1, .5);
+scene.add(amb);
+scene.add(point);
+var grid = new THREE.GridHelper(10, 10);
+scene.add(grid);
+
+function getOrtho(v: vec3): vec3{
+    return new vec3(v.y, v.z, v.x);//v.xyz = v.yzx
+}
+const orthoAxis = new vec3(1,1,1).normalize();
+//Cube rendering
+const smallCubeGeo = new THREE.BoxGeometry(.98, .98, .98);
+const bigCubeGeo = new THREE.BoxGeometry(.98, .98, .98);
+let cubeMats = [
+    new THREE.MeshLambertMaterial( { color: 0xffcc00}),
+    new THREE.MeshLambertMaterial( { color: 0x00ffab}),
+    new THREE.MeshLambertMaterial( { color: 0xffcc00, transparent: true, opacity: 0.6}),
+    new THREE.MeshLambertMaterial( { color: 0x00ffab, transparent: true, opacity: 0.6}),
+    new THREE.MeshBasicMaterial( { color: 0x00ffab, transparent: true, opacity: 0.1}),
+    new THREE.MeshBasicMaterial( { color: 0xffcc00, transparent: true, opacity: 0.1}),
+];
+
 class SpatialSet{
     set: boolean[];
-    constructor(){
-        this.set = new Array<boolean>(3*3*3).fill(false);
+    width: number;
+    height: number;
+    depth: number;
+    constructor(width=3, height=3, depth=3){
+        this.set = new Array<boolean>(width*height*depth).fill(false);
+        [this.width, this.height, this.depth] = [width, height, depth];
     }
+    static withSize = (size=3) => new SpatialSet(size, size, size);
     vecToIndex({x, y, z}: vec3){
-        let [WIDTH, HEIGHT] = [3, 3];
-        return x + WIDTH * (y + HEIGHT * z);
+        return x + this.width * (y + this.height * z);
     }
     has(v: vec3): boolean{
         let i = this.vecToIndex(v);
-        if(i < 0 || i >= this.set.length) console.error(`Vector ${v} out of bounds as ${i}`);
         return this.set[i];
     }
     add(v: vec3){
         let i = this.vecToIndex(v);
-        if(i < 0 || i >= this.set.length) console.error(`Vector ${v} out of bounds as ${i}`);
         this.set[i] = true;
     }
     delete(v: vec3){
         let i = this.vecToIndex(v);
-        if(i < 0 || i >= this.set.length) console.error(`Vector ${v} out of bounds as ${i}`);
         this.set[i] = false;
     }
     toString(): string{
@@ -93,177 +96,69 @@ class Bounds{
 }
 
 
-{
-    type CubeList = THREE.Mesh[];
-    let cubes: CubeList = [];
-    let totalCubes = 0;
-    let hardMax = new vec3(2, 2, 2);
-    let hardMin = new vec3(0, 0, 0);
-    let hardBounds: Bounds;
-    let spatialSet = new SpatialSet();
-
-    // let segments = [ 3, 1, 1, 2, 1, 2, 1, 1, 2, 2, 1, 1, 1, 2, 2, 2, 2];
-    let segments = [3, 2, 1, 2, 1, 2, 1, 1, 1, 2, 2, 2, 1, 2, 2, 2];
-    let segmentHeads:number[] = [];
-    let moveList:vec3[] = [];
-    var cubeSolver = {
-        cubes, totalCubes, hardMax, hardMin, hardBounds, segments, spatialSet, moveList, segmentHeads,
-        initCubes(): void{
-            var j = 0;
-            let parent: Object3D = scene;
-            let pos = new vec3(0,0,1);
-            for(const i of this.segments){
-                for(let k = 0; k < i; k++){
-                    var cube = new THREE.Mesh( geometry, j % 2 == 0 ? mat1 : mat2 );
-                    cube.position.copy(pos);
-                    parent.add( cube );
-                    this.cubes.push(cube);
-                    cube.matrixAutoUpdate = true;
-                    parent = cube;
-                    j++;
-                }
-                this.segmentHeads.push(j-1);
-                cube.rotateOnAxis(orthoAxis, -2*Math.PI/3); //Rotate z-axis to y-axis
+var solver = new class {
+    cubes = []
+    hardBounds = new Bounds(new vec3(2, 2, 2), new vec3(0, 0, 0))
+    segments = [2, 2, 1, 2, 1, 2, 1, 1, 1, 2, 2, 2, 1, 2, 2, 3]
+    segmentHeads = new Array<number>()
+    unfoldedDirs = [new vec3(1,0,0), new vec3(0,0,1)]
+    cubeParent = new THREE.Object3D()
+    solutions = []
+    initCubes(): void{
+        if(this.cubes.length > 0){
+            this.cubeParent.remove(this.cubes[0]);
+            this.cubes.splice(0, this.cubes.length);
+            this.segmentHeads.splice(0, this.segmentHeads.length);
+            this.solutions = [];
+        }
+        var cubeIndex = 0;
+        let parent = this.cubeParent;
+        scene.add(parent);
+        let pos = new vec3(0,0,1);
+        parent.position.copy(pos).negate();
+        
+        for(const [segmentNum, i] of this.segments.entries()){
+            this.segmentHeads.push(cubeIndex);
+            for(let k = 0; k < i; k++){
+                var cube = new THREE.Mesh( smallCubeGeo, cubeMats[cubeIndex%2]);
+                cube.matrixAutoUpdate = true;
+                parent.add( cube );
+                cube.position.copy(pos);
+                this.cubes.push(cube);
+                parent = cube;
+                if(k == 0 && cubeIndex != 0) cube.rotateY(segmentNum%2 == 0 ? -halfPi : halfPi);
+                cubeIndex++;
             }
-            this.totalCubes = j;
-            this.hardBounds = new Bounds(this.hardMax, this.hardMin);
-        },
-        initCubesDefault(): void{
-            var j = 0;
-
-            for(const i of this.segments){
-                for(let k = 0; k < i; k++){
-                    var cube = new THREE.Mesh( geometry, j % 2 == 0 ? mat1 : mat2 );
-                    cube.scale.set(.98, .98, .98);
-                    cube.position.set(0, 0, 0);
-                    scene.add( cube );
-                    this.cubes.push(cube);
-                    // pos.add(dir);
-                    j++;
-                }
-                this.segmentHeads.push(j-1);
-            }
-            this.totalCubes = j;
-            this.hardBounds = new Bounds(this.hardMax, this.hardMin);
-        },
-        makeCubeOfCubes(): void{
-            let i = 0;
-            for(let cube of this.cubes){
-                cube.position.set(i % 3, Math.floor((i % 9) / 3), Math.floor(i / 9));
-                // console.log(`Position ${cube.position} converts to ${this.spatialSet.vecToIndex(cube.position)}`);
-                i++;
-            }
-        },
-        drawSegment(segment: number, index: number, visible = true): number{
-            segment = this.segments[segment];
-            let i = index;
-            for(; i < segment+index; i++){
-                let cube = this.cubes[i];
-                pos.add(dir);
-                //scene.add(cubes[i+index]);
-                cube.visible = visible;
-            }
-            return i;
-        },
-        showCubes(visible: boolean = true): void{
-            for(let cube of this.cubes){
-                cube.visible = visible;
-            }
-        },
-        extend(): void{
-            var pos = new vec3(0),
-                dir = new vec3(1, 0, 0),
-                up = new vec3();
-            
-            let j = 0, i = 0;
-            for(let seg of this.segments){
-                for(var k = 0; k < seg; k++){
-                    let cube = this.cubes[i];
-                    pos.add(dir);
-                    cube.position.set(pos.x, pos.y, pos.z);
-                    i++;
-                }
-                console.log(dir);
-                // pos.sub(dir);
-                if(j % 2 == 0){
-                    dir.set(-dir.y, dir.x, 0);
-                }else{
-                    dir.set(dir.y, -dir.x, 0);
-                }
-                j++;
-            }
-        },
-        addSegment(segmentIndex: number, index: number, pos:vec3, dir:vec3): number{
-            let segment = this.segments[segmentIndex];
-            let i = index;
-            for(; i < segment+index; i++){
-                pos.add(dir);
-                console.log(`Adding cube ${i}; max is ${segment}`);
-                let cube = this.cubes[i];
-                cube.position.set(pos.x, pos.y, pos.z);
-                cube.visible = true;
-                //scene.add(cubes[i+index]);
-            }
-            let v = getOrtho(dir);
-            dir.set(v.x, v.y, v.z);
-            return i;
-        },
-        *placeIter(segmentIndex: number, index: number, pos: vec3, parentDir: vec3): Generator<void, void, boolean>{
-            let segment = this.segments[segmentIndex];
-            console.log("placing");
-            let dir: vec3 = getOrtho(parentDir);
-            do{
-                var i = index;
-                var newPos = pos.clone();
-                dir.crossVectors(dir, parentDir);
-                console.log(`Going again ${dir}`);
-                for(; i < segment+index; i++){
-                    newPos.add(dir);
-                    console.log(`Adding cube ${i}; max is ${segment} at ${newPos}`);
-                    let cube = this.cubes[i];
-                    cube.position.set(newPos.x, newPos.y, newPos.z);
-                    cube.visible = true;
-                }
-            }while(!(yield null))
-            console.log(`Placed ${i} against ${this.totalCubes}`);
-            if(i < this.totalCubes){
-                //Recursive pausing
-                yield* this.placeIter(segmentIndex+1, i, newPos, dir);
-            }
-        },
-        solve(segmentIndex: number, index: number, pos: vec3, parentDir: vec3, hardBounds: Bounds, currentBounds: Bounds, spatialSet: SpatialSet, moveList: vec3[], cubes:CubeList=this.cubes): vec3[] | null{
-            // console.log(`Hard min: ${hardBounds.min}\nHard max: ${hardBounds.max}`);
-            let segment = this.segments[segmentIndex];
-            // console.log("placing");
+        }
+        segmentInput.value = this.segments.join(', ');
+        renderer.render( scene, camera );
+    }
+    solve() : vec3[][]{
+        let solutions = [];
+        // solver.initCubes();
+        function solveSegment(pos: vec3, parentDir: vec3, hardBounds: Bounds, occupiedSpaces: SpatialSet, moveList: vec3[], numCubes: number, segments: number[], segmentIndex = 0, startIndex = 0): vec3[] | null{
+            let segmentLength = segments[segmentIndex];
             let dir = getOrtho(parentDir);
             let turn = 0;
             do{
                 moveList.push(dir);
-                var i = index;
+                var i = startIndex;
                 var newPos = pos.clone();
-                // console.log(`Going again ${dir}`);
                 let segmentCompleted = true;
-                for(; i < segment+index; i++){
-                    newPos.add(dir);
-                    console.log(`Placing at ${newPos}`);
-                    if(spatialSet.has(newPos) || !hardBounds.has(newPos)){
-                        console.log("failed segment");
-                        // if(spatialSet.has(newPos)) console.log("%c\tAlready placed", "color: #f00");
-                        // if(!hardBounds.has(newPos)) console.log("%c\tOut of range", "color: #f00");
+                for(; i < segmentLength+startIndex; i++){
+                    if(occupiedSpaces.has(newPos) || !hardBounds.has(newPos)){
+                        // console.log('failed segment', newPos, 'index:', i);
                         segmentCompleted = false;
                         break;
                     }
-                    // cubes[i].position.set(newPos.x, newPos.y, newPos.z);
-                    spatialSet.add(newPos);
+                    occupiedSpaces.add(newPos);
+                    newPos.add(dir);
                 }
                 
-                // console.log(`Placed ${i} against ${this.totalCubes}`);
                 if(segmentCompleted){
-                    if(i < this.totalCubes){
-                        //Recursion
-                        let res = this.solve(segmentIndex+1, i, newPos, dir.clone(), hardBounds, currentBounds, spatialSet, moveList, cubes);
-                        if(res !== null)
-                            return res;
+                    if(i < numCubes){
+                        let res = solveSegment(newPos, dir.clone(), hardBounds, occupiedSpaces, moveList, numCubes, segments, segmentIndex+1, i);
+                        if(res !== null) return res;
                     }else{
                         console.log("%cCube solved", "color: #0f0");
                         return moveList;
@@ -272,206 +167,267 @@ class Bounds{
                 
                 //Reset b4 moving on
                 moveList.pop();
-                newPos = pos.clone();
-                for(let j=index; j<i; j++){
-                    // let cube = cubes[j];
-                    // console.log(cube.position);
-                    spatialSet.delete(newPos.add(dir));
-                }
-
+                // newPos = pos.clone();
+                for(let j=startIndex; j<i; j++) occupiedSpaces.delete(newPos.sub(dir));
+    
                 turn++;
                 dir.crossVectors(parentDir, dir);
             }while(turn < 4)
-            console.log('')
             return null;
-        },
-        *solveIter(segmentIndex: number, index: number, pos: vec3, parentDir: vec3, hardBounds: Bounds, currentBounds: Bounds, spatialSet: SpatialSet, moveList: vec3[], cubes:CubeList=this.cubes): Generator<void, vec3[], boolean>{
-            // console.log(`Hard min: ${hardBounds.min}\nHard max: ${hardBounds.max}`);
-            let segment = this.segments[segmentIndex];
-            // console.log("placing");
-            let dir = getOrtho(parentDir);
-            let turn = 0;
-            do{
-                moveList.push(dir);
-                var i = index;
-                var newPos = pos.clone();
-                // console.log(`Going again ${dir}`);
-                let segmentCompleted = true;
-                for(; i < segment+index; i++){
-                    newPos.add(dir);
-                    console.log(`Placing at ${newPos}`);
-                    if(spatialSet.has(newPos) || !hardBounds.has(newPos)){
-                        console.log("failed segment");
-                        if(spatialSet.has(newPos)) console.log("%c\tAlready placed", "color: #f00");
-                        if(!hardBounds.has(newPos)) console.log("%c\tOut of range", "color: #f00");
-                        segmentCompleted = false;
-                        break;
-                    }
-                    // console.log(`Adding cube ${i}; max is ${segment} at ${newPos}`);
-                    let cube = cubes[i];
-                    cube.position.set(newPos.x, newPos.y, newPos.z);
-                    cube.visible = true;
-                    spatialSet.add(newPos);
-                }
-                // console.log(`Placed ${i} against ${this.totalCubes}`);
-                console.log(`Set be lookin' like: ${{spatialSet}}`);
-                console.log(`${i} cubes placed`)
-                if(segmentCompleted){
-                    if(i < this.totalCubes){
-                        //Recursive pausing
-                        yield null;
-                        yield* this.solveIter(segmentIndex+1, i, newPos, dir, hardBounds, currentBounds, spatialSet, cubes);
-                    }else{
-                        console.log("%cCube solved", "color: #0f0");
-                        return moveList;
-                    }
-                }else{
-                    yield null; //Failure
-                }
-                
-                //Reset b4 moving on
-                moveList.pop();
-                for(let j=index; j<i; j++){
-                    let cube = cubes[j];
-                    spatialSet.delete(cube.position);
-                    cube.visible = false;
-                }
-
-                turn++;
-                dir.crossVectors(parentDir, dir);
-            }while(!(yield null) && turn < 4)
-            return;
         }
+        let solution = solveSegment(new vec3(), new vec3(1,0,0), this.hardBounds, new SpatialSet(3, 3, 3), [], this.cubes.length, this.segments);
+        if(solution) solutions.push(solution);
+        return solutions;
+    }
+    *orientCubes(solution: vec3[]): Generator<void, void, number>{
+        const rotSpeed = Math.PI;
+        const startDir = new vec3(0,0,1);
+        const endDir = new vec3();
+        const rotAxis = new vec3(1,0,0);
+        
+        for(const [i, cube] of this.cubes.entries()) cube.material = cubeMats[(i%2) + 4];
+        let index = 0;
+        for(const [i, cubeIndex] of solver.segmentHeads.entries()){
+            let cube = solver.cubes[cubeIndex];
+            // console.log(cube.getWorldPosition(TEMP_V).toString());
+    
+            // Put segment orientation in local space
+            let worldToLocal = TEMP_M.getInverse(cube.matrixWorld);
+            endDir.copy(solution[i]);
+            endDir.transformDirection(worldToLocal).round();
+            // console.log(rotAxis);
+    
+            // Correct for lack of signed angles
+            let targetAngle = startDir.angleTo(endDir);
+            let angleSign = 1;
+            if(rotAxis.dot(TEMP_V.crossVectors(startDir, endDir)) < 0) {
+                targetAngle = -targetAngle;
+                angleSign = -1;
+            }
+            this.forOfSegment(i, (cube, j) => cube.material = cubeMats[j%2 + 2]);
+            while(true){
+                let deltaTime = yield null;
+                let deltaAngle = rotSpeed*deltaTime;
+                if(Math.abs(targetAngle) <= deltaAngle){
+                    cube.rotateOnAxis(rotAxis, targetAngle);
+                    deltaTime -= Math.abs(targetAngle) / rotSpeed;
+                    break;
+                }
+                deltaAngle *= angleSign;
+                cube.rotateOnAxis(rotAxis, deltaAngle);
+                targetAngle -= deltaAngle;
+            }
+            this.forOfSegment(i, (cube, j) => cube.material = cubeMats[j%2]);
+        }
+    }
+    reverseSegments(segments: number[] = this.segments): number[]{
+        segments[0]++; segments[segments.length-1]--;
+        return segments.reverse();
+    }
+    pointToIndex(point: vec3): number{
+        for(const [index, cube] of this.cubes.entries())
+            if(cube.getWorldPosition(TEMP_V).round().equals(point))
+                return index;
+        return -1;
+    }
+    generateSegments(overrideIndex: number, overridePosition: Vector3, offsetChildren = false){
+        let cubes = <THREE.Mesh[]>this.cubes;
+        let oldPos = (cubes[0]).getWorldPosition(TEMP_V).clone();
+        let oldDir = new vec3().subVectors(
+            overrideIndex === 1 ? overridePosition : cubes[1].getWorldPosition(TEMP_V),
+            oldPos);
+        if(offsetChildren) var offset = new vec3().subVectors(overridePosition, cubes[overrideIndex].getWorldPosition(TEMP_V));
+        overrideIndex;
+        let newSegs:number[] = [1];
+        for(const [index, cube] of cubes.entries()){
+            if(index === 0)
+                continue;
+            // console.log(index, overrideIndex);
+            let newPos = (index === overrideIndex) ? overridePosition
+                : cube.getWorldPosition(TEMP_V).clone();
+            if(offsetChildren && index > overrideIndex) newPos.add(offset);
+            // console.log(newPos);
+            let newDir = TEMP_V.subVectors(newPos, oldPos).clone();
+            // console.log('Old direction:', oldDir, '\nNew direction:', newDir);
+            // console.log('Old position:', oldPos, '\nNew position:', newPos);
+            // console.log(oldDir.dot(newDir));
+            if(oldDir.dot(newDir) > .95){
+                newSegs[newSegs.length-1]++;
+            }
+            else {
+                newSegs[newSegs.length-1]--;
+                newSegs.push(2);
+            }
+
+            [oldPos, oldDir] = [newPos, newDir]
+        }
+        // console.log(newSegs);
+        undoStack.do(this.segments);
+        this.segments = newSegs;
+        // TODO
+        // console.log(newSegs.reduce((p, c) => p+c));
+    }
+    segmentsToString(){
+        return this.segments.join(', ');
+    }
+    forOfSegment(segmentIndex, fn):void{
+        let cubeIndex = this.segmentHeads[segmentIndex];
+        for(let i=cubeIndex;i<cubeIndex+this.segments[segmentIndex];i++) fn(this.cubes[i], i);
     }
 }
 
-// cubeSolver.initCubesDefault();
-// cubeSolver.showCubes(false);
-cubeSolver.initCubes();
-/*
-// cubeSolver.extend();
-cubeSolver.makeCubeOfCubes();
-*/
-dir = new vec3(1, 0, 0);
-pos = getOrtho(dir).clone().negate();
+// TODO
+function startingPositions(){
+    let pMat = new THREE.MeshBasicMaterial({color: 0xff0000,transparent: true, opacity: 0.3});
+    let [width, height, depth] = [3, 3, 1];
 
-let solution = cubeSolver.solve(0, 0, pos, dir, cubeSolver.hardBounds, cubeSolver.hardBounds, cubeSolver.spatialSet, cubeSolver.moveList, cubeSolver.cubes);
-solution.shift();
+    let [maxX, maxY, maxZ] = [width, height, depth].map(x=>Math.ceil(x/2));
+    let dydx = maxY/maxX,
+        dzdy = maxZ/maxY;
+    // let fullCube = new THREE.Mesh(bigCubeGeo, new THREE.MeshBasicMaterial({color: 0xff0000,transparent: true, opacity: 0.0}));
+    // scene.add(fullCube);
+    // fullCube.scale.set(width, height, depth);
+    // fullCube.position.set(width, height, depth).multiplyScalar(0.5).floor();
 
-let extendedDirs = [new vec3(1,0,0), new vec3(0,0,1)];
-console.log(extendedDirs);
-let extend = new Array<vec3>(solution.length);
-for(let i=0;i<solution.length;i++){
-    console.log(extendedDirs[i%2]);
-    // extend.push(extendedDirs[i%2]);
-    extend[i] = extendedDirs[i%2];
-    console.log(extend[i]);
+    for(let x=0; x<maxX; x++){
+        for(let y=0; y<=x*dydx; y++){
+            for(let z=0; z<=y*dzdy; z++){
+                let cube = new THREE.Mesh(smallCubeGeo, pMat);
+                cube.position.set(x,y,z);
+                scene.add(cube);
+            }
+        }
+    }
 }
-// let solution = new Array<number>(17).fill(3);
-// let solution = [0, 1, 3, 3, 2, 2, 3, 1, 1, 2, 2, 3, 0, 1, 3, 0];
-// solution = [0, 0, 1, 3, 3, 2, 2, 3, 1, 1, 2, 2, 3, 0, 1, 3, 0];
-console.log('solution');
-console.log(solution);
-console.log('heads');
-console.log(cubeSolver.segmentHeads);
-/*
-// let placement = cubeSolver.solveIter(0, 0, pos, dir, cubeSolver.hardBounds, cubeSolver.hardBounds, cubeSolver.spatialSet, cubeSolver.moveList, cubeSolver.cubes);
-let placement = cubeSolver.placeIter(0, 0, pos, dir);
-// placement.next(true);
-// for(const _ of placement){
-//     console.log('working');
-// }
+let undoStack = new class<T = number[]>{
+    undoStack = new Array<T>();
+    redoStack = new Array<T>();
+    do(action: T):void{
+        this.redoStack.splice(0, this.redoStack.length);
+        this.undoStack.push(action);
+    }
+    undo(): T{
+        console.log(`Undo stack: ${this.undoStack.length}`);
+        let action = this.undoStack.pop();
+        if(action !== undefined) this.redoStack.push(action);
+        return action;
+    }
+    redo(): T{
+        console.log(`Redo stack: ${this.redoStack.length}`);
+        let action = this.redoStack.pop();
+        if(action !== undefined) this.undoStack.push(action);
+        return action;
+    }
+};
+let axes = new THREE.AxesHelper(5);
+axes.position.setY(1);
+scene.add(axes);
+let solution : vec3[];
 
-let boundsCube = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({color:0x00ff00,opacity:0.1,transparent:true}));
-boundsCube.scale.set(3,3,3);
-boundsCube.position.set(1,1,1);
-scene.add(boundsCube);
-let showNext = false;
+let controlParent = document.getElementsByClassName('control')[0];
+let place : Generator<void, void, number>;
+let showSolution = controlParent.appendChild(document.createElement('button'));
+showSolution.innerHTML = 'Refresh Solution'; showSolution.type = 'button';
+showSolution.onclick = () => {
+    let sols = solver.solve();
+    solution = sols[0];
+    console.log('solution', sols);
+    place = solver.orientCubes(solution);
+};
 
-//HTML
-document.getElementById('next').onclick = () => placement.next(true);//showNext = true;
-document.getElementById('rotate').onclick = () => placement.next(false);
-
-let axis = new vec3(1);
-*/
-let segs = cubeSolver.segments.entries();
-let nextSeg = segs.next();
-let cubeIndex = 0;
-
+document.getElementById('reverse-segments').onclick = () => {
+    undoStack.do([...solver.segments]);
+    solver.reverseSegments();
+    solver.initCubes();
+    // segmentInput.value = solver.segmentsToString();
+    showSolution.onclick(null);
+    paused = true;
+};
 let paused = true;
-document.getElementById('toggle-pause').onclick = () => paused = !paused;//showNext = true;
+document.getElementById('toggle-pause').onclick = () => paused = !paused;
+let segmentInput = document.getElementById('segment-editor') as HTMLInputElement;
+// segmentInput.value = solver.segmentsToString();
+segmentInput.onchange = (e) => {
+    let segString = segmentInput.value;
+    let newSegs = [];
+    for(const segSize of segString.split(',')){
+        const size = parseInt(segSize);
+        if(isNaN(size) || size < 1) {
+            console.error('cube layout contained a non number'); return;
+        } else newSegs.push(size);
+    }
+    undoStack.do(solver.segments = newSegs);
+    // segmentInput.value = solver.segmentsToString();
+    solver.initCubes();
+    console.log(newSegs);
+};
+solver.initCubes();
+showSolution.onclick(null);
 const deltaT = 0.5;
 let nextTime = 0;
 let time = 0;
 let oldNow = 0;
 
-let glowMat = new THREE.MeshBasicMaterial({color: 0xffffff});
-
-let lineXMat = new THREE.LineBasicMaterial({color: 0xff0000, transparent: true}),
-    lineYMat = new THREE.LineBasicMaterial({color: 0x00ff00, transparent: true}),
-    lineZMat = new THREE.LineBasicMaterial({color: 0x0000ff, transparent: true});
-let lineMats = [lineXMat, lineYMat, lineZMat];
-
-cubeSolver.segmentHeads.pop();
-let axes = [new vec3(2,0,0), new vec3(0,2,0), new vec3(0,0,2)];
-for(const i of cubeSolver.segmentHeads){
-    let cube = cubeSolver.cubes[i];
-    // cube.material = glowMat;
-    for(let j = 0; j < 3; j++){
-        let line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([
-            new vec3(0),
-            axes[j]
-        ]), lineMats[j]);
-        line.renderOrder = 1;
-        lineMats[j].depthTest = false;
-        cube.add(line);
-    }
+let mousePos = new THREE.Vector3();
+let mouseCube = new THREE.Mesh(smallCubeGeo, new THREE.MeshLambertMaterial({transparent: true, color: 0xffffff, opacity: 0.5, depthTest: false}));
+scene.add(mouseCube);
+let targetIndex = -1;
+enum ReorientationDir{
+    UpLeft, RightDown
 }
-
-function* orientCubes(solution: vec3[]): Generator<void, void, number>{
-    const rotSpeed = Math.PI;
-    const startDir = new vec3(0,0,1);
-    const endDir = new vec3();
-    const rotAxis = new vec3(1,0,0);
-    const _v = new vec3();
-    const _m = new Matrix4();
-    for(const [i, cubeIndex] of cubeSolver.segmentHeads.entries()){
-        let cube = cubeSolver.cubes[cubeIndex];
-
-        // Put segment orientation in local space
-        let worldToLocal = _m.getInverse(cube.matrixWorld);
-        endDir.copy(solution[i]);
-        endDir.transformDirection(worldToLocal).round();
-        console.log(rotAxis);
-
-        // Correct for lack of angle 
-        let angle = startDir.angleTo(endDir);
-        let angleSign = 1;
-        if(rotAxis.dot(_v.crossVectors(startDir, endDir)) < 0) {
-            angle = -angle;
-            angleSign = -1;
+let newSegmentDir = ReorientationDir.RightDown;
+renderer.domElement.onmousemove = (e) => {
+    mousePos.set(
+        ( e.clientX / window.innerWidth ) * 2 - 1,
+        -(e.clientY / window.innerHeight ) * 2 + 1,
+        1
+    ).unproject(camera);
+    //Cast to ground plane
+    mousePos.multiplyScalar( (camera.position.y-.5) / -mousePos.y);
+    mousePos.x += camera.position.x;
+    mousePos.z += camera.position.z;
+    mousePos.round().setY(0);
+    let checkLeft = mousePos.clone(); checkLeft.z -= 1;
+    let checkDown = mousePos.clone(); checkDown.x -= 1;
+    let checkLeftUp = checkLeft.clone(); checkLeftUp.x += 1;
+    let checkDownRight = checkDown.clone(); checkDownRight.z += 1;
+    let cubeColor = mouseCube.material.color;
+    targetIndex = -1;
+    cubeColor.set(0xffffff);
+    if(     (solver.pointToIndex(checkLeft) !== -1 && (targetIndex = solver.pointToIndex(checkLeftUp)) > 1)
+        ||  (solver.pointToIndex(checkDown) !== -1 && (targetIndex = solver.pointToIndex(checkDownRight)) > 1)){
+        if(e.button === 0 && !orbitControls.enableRotate){
+            solver.generateSegments(targetIndex, mousePos);
+            solver.initCubes();
         }
-        console.log(`angle: ${angle}`);
-        console.log('End: ', endDir);
-        console.log('Start: ', startDir);
-        console.log('Axis: ', rotAxis);
-
-        while(true){
-            let deltaTime = yield null;
-            let deltaAngle = rotSpeed*deltaTime;
-            // console.log(angle);
-            if(Math.abs(angle) <= deltaAngle){
-                cube.rotateOnAxis(rotAxis, angle);
-                break;
-            }
-            deltaAngle *= angleSign;
-            cube.rotateOnAxis(rotAxis, deltaAngle);
-            angle -= deltaAngle;
-        }
-        yield null;
     }
-}
-let place = orientCubes(extend);
+    mouseCube.position.set(mousePos.x, 0, mousePos.z);
+};
+window.addEventListener('keydown', (e) =>{
+
+    if(e.ctrlKey || e.metaKey){
+        let action = e.key === 'z' ? undoStack.undo() : (e.key === 'x' ? undoStack.redo() : undefined);
+        if(action !== undefined){
+            solver.segments = action;
+            solver.initCubes();
+        }
+    }
+});
+// solver.generateSegments(0, mousePos);
+// solver.initCubes();
+renderer.domElement.addEventListener('mousedown', (e) => {
+    if(e.button !== 0) return;
+    if(targetIndex > 1){
+        orbitControls.enableRotate = false;
+        solver.generateSegments(targetIndex, mousePos);
+        solver.initCubes();
+    }
+});
+renderer.domElement.addEventListener('mouseup', e => orbitControls.enableRotate = true);
+// axes = new THREE.AxesHelper(1);
+// for(const i of solver.segmentHeads) solver.cubes[i].add(axes.clone());
+
+
 
 function animate( now: number ) {
     requestAnimationFrame( animate );
@@ -480,18 +436,11 @@ function animate( now: number ) {
     oldNow = now;
     if(!paused){
         time += deltaTime;
-        if(place.next(deltaTime).done){
-            place = orientCubes(solution);
-        }
-        // if(time > nextTime){
-        //     nextTime += deltaT;
-        //     // solver.next();
-        //     place.next(deltaTime);
-        // }   
+        place.next(deltaTime);
     }
     renderer.render( scene, camera );
 }
 
-requestAnimationFrame(animate);
 
-// console.log("Bruh, idk if it worked");
+
+requestAnimationFrame(animate);
