@@ -147,7 +147,6 @@ var solver = new class {
                 let segmentCompleted = true;
                 for(; i < segmentLength+startIndex; i++){
                     if(occupiedSpaces.has(newPos) || !hardBounds.has(newPos)){
-                        // console.log('failed segment', newPos, 'index:', i);
                         segmentCompleted = false;
                         break;
                     }
@@ -189,13 +188,11 @@ var solver = new class {
         let index = 0;
         for(const [i, cubeIndex] of solver.segmentHeads.entries()){
             let cube = solver.cubes[cubeIndex];
-            // console.log(cube.getWorldPosition(TEMP_V).toString());
     
             // Put segment orientation in local space
             let worldToLocal = TEMP_M.getInverse(cube.matrixWorld);
             endDir.copy(solution[i]);
             endDir.transformDirection(worldToLocal).round();
-            // console.log(rotAxis);
     
             // Correct for lack of signed angles
             let targetAngle = startDir.angleTo(endDir);
@@ -230,7 +227,7 @@ var solver = new class {
                 return index;
         return -1;
     }
-    generateSegments(overrideIndex: number, overridePosition: Vector3, offsetChildren = false){
+    generateSegments(overrideIndex: number, overridePosition: Vector3, offsetChildren = false): number[]{
         let cubes = <THREE.Mesh[]>this.cubes;
         let oldPos = (cubes[0]).getWorldPosition(TEMP_V).clone();
         let oldDir = new vec3().subVectors(
@@ -242,15 +239,11 @@ var solver = new class {
         for(const [index, cube] of cubes.entries()){
             if(index === 0)
                 continue;
-            // console.log(index, overrideIndex);
             let newPos = (index === overrideIndex) ? overridePosition
                 : cube.getWorldPosition(TEMP_V).clone();
             if(offsetChildren && index > overrideIndex) newPos.add(offset);
             // console.log(newPos);
             let newDir = TEMP_V.subVectors(newPos, oldPos).clone();
-            // console.log('Old direction:', oldDir, '\nNew direction:', newDir);
-            // console.log('Old position:', oldPos, '\nNew position:', newPos);
-            // console.log(oldDir.dot(newDir));
             if(oldDir.dot(newDir) > .95){
                 newSegs[newSegs.length-1]++;
             }
@@ -261,9 +254,7 @@ var solver = new class {
 
             [oldPos, oldDir] = [newPos, newDir]
         }
-        // console.log(newSegs);
-        undoStack.do(this.segments);
-        this.segments = newSegs;
+        return (this.segments = newSegs);
         // TODO
         // console.log(newSegs.reduce((p, c) => p+c));
     }
@@ -302,23 +293,30 @@ function startingPositions(){
 let undoStack = new class<T = number[]>{
     undoStack = new Array<T>();
     redoStack = new Array<T>();
+    currentState: T;
     do(action: T):void{
         this.redoStack.splice(0, this.redoStack.length);
-        this.undoStack.push(action);
+        this.undoStack.push(this.currentState);
+        this.currentState = action;
     }
     undo(): T{
-        console.log(`Undo stack: ${this.undoStack.length}`);
         let action = this.undoStack.pop();
-        if(action !== undefined) this.redoStack.push(action);
-        return action;
+        if(action !== undefined) {
+            this.redoStack.push(this.currentState);
+            this.currentState = action;
+        }
+        return this.currentState;
     }
     redo(): T{
-        console.log(`Redo stack: ${this.redoStack.length}`);
         let action = this.redoStack.pop();
-        if(action !== undefined) this.undoStack.push(action);
-        return action;
+        if(action !== undefined) {
+            this.undoStack.push(this.currentState);
+            this.currentState = action;
+        }
+        return this.currentState;
     }
 };
+undoStack.do([...solver.segments]);
 let axes = new THREE.AxesHelper(5);
 axes.position.setY(1);
 scene.add(axes);
@@ -336,10 +334,8 @@ showSolution.onclick = () => {
 };
 
 document.getElementById('reverse-segments').onclick = () => {
-    undoStack.do([...solver.segments]);
-    solver.reverseSegments();
+    undoStack.do([...solver.reverseSegments()]); 
     solver.initCubes();
-    // segmentInput.value = solver.segmentsToString();
     showSolution.onclick(null);
     paused = true;
 };
@@ -357,7 +353,6 @@ segmentInput.onchange = (e) => {
         } else newSegs.push(size);
     }
     undoStack.do(solver.segments = newSegs);
-    // segmentInput.value = solver.segmentsToString();
     solver.initCubes();
     console.log(newSegs);
 };
@@ -369,7 +364,8 @@ let time = 0;
 let oldNow = 0;
 
 let mousePos = new THREE.Vector3();
-let mouseCube = new THREE.Mesh(smallCubeGeo, new THREE.MeshLambertMaterial({transparent: true, color: 0xffffff, opacity: 0.5, depthTest: false}));
+let mouseCube = new THREE.Mesh(smallCubeGeo);
+mouseCube.visible = false;
 scene.add(mouseCube);
 let targetIndex = -1;
 enum ReorientationDir{
@@ -391,43 +387,44 @@ renderer.domElement.onmousemove = (e) => {
     let checkDown = mousePos.clone(); checkDown.x -= 1;
     let checkLeftUp = checkLeft.clone(); checkLeftUp.x += 1;
     let checkDownRight = checkDown.clone(); checkDownRight.z += 1;
-    let cubeColor = mouseCube.material.color;
     targetIndex = -1;
-    cubeColor.set(0xffffff);
     if(     (solver.pointToIndex(checkLeft) !== -1 && (targetIndex = solver.pointToIndex(checkLeftUp)) > 1)
         ||  (solver.pointToIndex(checkDown) !== -1 && (targetIndex = solver.pointToIndex(checkDownRight)) > 1)){
+        mouseCube.material = cubeMats[targetIndex%2+2];
+        mouseCube.visible = true;
         if(e.button === 0 && !orbitControls.enableRotate){
-            solver.generateSegments(targetIndex, mousePos);
+            undoStack.do(solver.generateSegments(targetIndex, mousePos).slice());
             solver.initCubes();
         }
+    } else{
+        mouseCube.visible = false;
     }
     mouseCube.position.set(mousePos.x, 0, mousePos.z);
 };
 window.addEventListener('keydown', (e) =>{
 
     if(e.ctrlKey || e.metaKey){
-        let action = e.key === 'z' ? undoStack.undo() : (e.key === 'x' ? undoStack.redo() : undefined);
+        let action: number[];
+        switch(e.key){
+            case 'z': action=undoStack.undo(); break;
+            case 'x': action=undoStack.redo(); break;
+        }
         if(action !== undefined){
             solver.segments = action;
             solver.initCubes();
         }
     }
 });
-// solver.generateSegments(0, mousePos);
-// solver.initCubes();
+
 renderer.domElement.addEventListener('mousedown', (e) => {
     if(e.button !== 0) return;
     if(targetIndex > 1){
         orbitControls.enableRotate = false;
-        solver.generateSegments(targetIndex, mousePos);
+        undoStack.do(solver.generateSegments(targetIndex, mousePos).slice());
         solver.initCubes();
     }
 });
 renderer.domElement.addEventListener('mouseup', e => orbitControls.enableRotate = true);
-// axes = new THREE.AxesHelper(1);
-// for(const i of solver.segmentHeads) solver.cubes[i].add(axes.clone());
-
-
 
 function animate( now: number ) {
     requestAnimationFrame( animate );
