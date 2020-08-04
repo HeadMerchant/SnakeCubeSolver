@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
+import * as dat from 'dat.gui';
 import vec3 = THREE.Vector3;
 
 const DOWN = new vec3(0,-1,0);
@@ -42,6 +44,15 @@ function getRevOrtho(v: vec3):vec3{
 //Cube rendering
 const smallCubeGeo = new THREE.BoxGeometry(.98, .98, .98);
 const bigCubeGeo = new THREE.BoxGeometry(1);
+const rotator = new TransformControls(camera, renderer.domElement);
+rotator.mode = 'rotate'; rotator.showY = false; rotator.space = 'local';
+rotator.rotationSnap = halfPi;
+rotator.addEventListener( 'dragging-changed', e=>{
+    orbitControls.enabled=!e.value
+    console.log(e);
+});
+scene.add(rotator);
+const raycaster = new THREE.Raycaster();
 let cubeMats = [
     new THREE.MeshLambertMaterial( { color: 0xffcc00}),
     new THREE.MeshLambertMaterial( { color: 0x00ffab}),
@@ -105,6 +116,9 @@ var solver = new class {
     cubeParent = new THREE.Object3D()
     solutions = []
     unfoldedRots:THREE.Euler[] = []
+    width = 3
+    height = 3
+    depth = 3
     initCubes(): void{
         if(this.cubes.length > 0){
             this.cubeParent.remove(this.cubes[0]);
@@ -133,12 +147,15 @@ var solver = new class {
                 cubeIndex++;
             }
         }
-        segmentInput.value = this.segments.join(', ');
+        appState.layoutString = this.segments.join(', ');
         appState.canEdit = true;
         renderer.render( scene, camera );
+        rotator.attach(this.cubes[0]);
     }
     solve() : vec3[][]{
-        function solveSegment(pos: vec3, parentDir: vec3, hardBounds: Bounds, occupiedSpaces: SpatialSet, moveList: vec3[], numCubes: number, segments: number[], segmentIndex = 0, startIndex = 0): vec3[] | null{
+        function solveSegment(pos: vec3, parentDir: vec3, hardBounds: Bounds,
+        occupiedSpaces: SpatialSet, moveList: vec3[], numCubes: number, segments: number[],
+        segmentIndex = 0, startIndex = 0, maxTurns = 4): vec3[] | null{
             let segmentLength = segments[segmentIndex];
             let dir = getOrtho(parentDir);
             let turn = 0;
@@ -158,7 +175,9 @@ var solver = new class {
                 
                 if(segmentCompleted){
                     if(i < numCubes){
-                        let res = solveSegment(newPos, dir.clone(), hardBounds, occupiedSpaces, moveList, numCubes, segments, segmentIndex+1, i);
+                        let res = solveSegment(newPos, dir.clone(), hardBounds, occupiedSpaces,
+                                    moveList, numCubes, segments,
+                                    segmentIndex+1, i, 4);
                         if(res !== null) return res;
                     }else{
                         console.log("%cCube solved", "color: #0f0");
@@ -172,14 +191,12 @@ var solver = new class {
     
                 turn++;
                 dir.crossVectors(parentDir, dir);
-            }while(turn < 4)
+            }while(turn < maxTurns)
             return null;
         }
 
         let [width, height, depth] = [3, 3, 3];
         let [maxX, maxY, maxZ] = [width, height, depth].map(x=>Math.ceil(x/2));
-        // let dydx = maxY/maxX,
-        //     dzdy = maxZ/maxY;
         let dxdz = maxX/maxZ,
             dydx = maxY/maxZ;
         // let fullCube = new THREE.Mesh(bigCubeGeo, new THREE.MeshBasicMaterial({color: 0xff0000,transparent: true, opacity: 0.0}));
@@ -197,18 +214,26 @@ var solver = new class {
         let validX=(x:number,dxdz:number,z:number)=>x<=z*dxdz,
             validY=(y:number,dydx:number,x:number)=>y<=x*dydx,
             validZ=(z:number,maxZ:number)=>z<maxZ;
-        // let pMat = new THREE.MeshBasicMaterial({color: 0xff0000,transparent: true, opacity: 0.3});
+        let pMat = new THREE.MeshBasicMaterial({color: 0xff0000,transparent: true, opacity: 0.3});
         this.solutions = [];
         for(let z=0;validZ(z,maxZ);z++){ for(let x=0;validX(x,dxdz,z);x++){ for(let y=0;validY(y,dydx,x);y++){
-        // for(let x=0; x<maxX; x++){ for(let y=0; y<=x*dydx; y++){ for(let z=0; z<=y*dzdy; z++){
             let startPos = new vec3(x,y,z);
-            // let cube = new THREE.Mesh(smallCubeGeo, pMat);
-            // cube.position.set(x,y,z);
-            // scene.add(cube);
+            let cube = new THREE.Mesh(bigCubeGeo, pMat);
+            cube.position.set(x,y,z);
+            scene.add(cube);
             for(const startDir of startDirs){
                 let c = TEMP_V.addVectors(startPos, startDir);
                 if(validZ(c.z,maxZ) && validX(c.x,dxdz,c.z) && validY(c.y,dydx,c.x)){
-                    let solution = solveSegment(c, getRevOrtho(startDir), this.hardBounds, new SpatialSet(3, 3, 3), [], this.cubes.length, this.segments);
+                    // let spatialSet = new SpatialSet(this.width, this.height, this.depth);
+                    // for(var i=0;i<this.segments[0];i++){
+                    //     spatialSet.add(c);
+                    //     c.add(startDir);
+                    // }
+                    // let moveList = [startDir.clone()];
+                    
+                    let solution = solveSegment(c, getRevOrtho(startDir), this.hardBounds,
+                                    new SpatialSet(this.width, this.height, this.depth), [],
+                                    this.cubes.length, this.segments, 0, 0, 1);
                     if(solution) this.solutions.push(solution);
                 }
             } 
@@ -340,76 +365,81 @@ scene.add(axes);
 let solution : vec3[];
 
 let appState = new class{
-    paused = true
-    canEdit = true
-    place : Generator<void, void, number>
-};
-let controlParent = document.getElementsByClassName('control')[0];
-function makeButton(name:string, onclick:(e:MouseEvent)=>void, parent=controlParent){
-    let button = document.createElement('button') as HTMLButtonElement;
-    button.innerHTML = name;
-    button.type = 'button';
-    button.onclick = onclick;
-    return parent.appendChild(button);
-}
-let showSolution = makeButton('Refresh Solution', ()=>{
-    let sols = solver.solve();
-    solution = sols[0];
-    console.log('solution', sols);
-    solver.unfoldSegments();
-    appState.paused = true;
-    appState.place = solver.rotateCubes(solution);
-});
-makeButton('Reverse Layout', ()=>{
-    undoStack.do([...solver.reverseSegments()]); 
-    solver.initCubes();
-    showSolution.onclick(null);
-    appState.paused = true;
-});
-makeButton('Unfold Cubes', ()=>{
-    solver.unfoldSegments();
-    appState.place=solver.rotateCubes(solver.solutions[0]);
-    appState.paused = true;
-});
-makeButton('Edit Layout', ()=>{
-    appState.canEdit = true;
-    solver.unfoldSegments();
-    appState.paused = true;
-    appState.place = solver.rotateCubes(solver.solutions[0]);
-});
-makeButton('Play', function(){this.innerHTML = (appState.paused = !appState.paused)?'Play':'Pause'});
-let segmentInput = document.getElementById('segment-editor') as HTMLInputElement;
-segmentInput.onchange = (e) => {
-    let segString = segmentInput.value;
-    let newSegs = [];
-    for(const segSize of segString.split(',')){
-        const size = parseInt(segSize);
-        if(isNaN(size) || size < 1) {
-            console.error('cube layout contained a non number'); return;
-        } else newSegs.push(size);
+    paused = true;
+    canEdit = true;
+    place : Generator<void, void, number>;
+    gui = new dat.GUI();
+    solutionSelector:dat.GUIController;
+    solutionIndex=0;
+    layoutString = "";
+    constructor(){
+        let gui = this.gui;
+        gui.add(this, 'paused');
+        gui.add(this, 'refreshSolution').name('Refresh Solution');
+        gui.add(this, 'reverseLayout').name('Reverse Layout');
+        gui.add(this, 'unfoldCubes').name('Unfold');
+        gui.add(this, 'editLayout').name('Edit Layout');
+        gui.add(this, 'layoutString').onFinishChange((str)=>{
+            let newSegs = [];
+            for(const segSize of str.split(',')){
+                const size = parseInt(segSize);
+                if(isNaN(size) || size < 1) {
+                    console.error('cube layout contained a non number'); return;
+                } else newSegs.push(size);
+            }
+            undoStack.do(solver.segments = newSegs);
+            solver.initCubes();
+            console.log(newSegs);
+        }).name('Layout');
+        gui.add(this, 'solutionIndex', solver.solutions).onFinishChange(()=>console.log('Changed'));
+        // gui.add(solver, 'width', 2, 8, 1).name('Cube Width');
+        // gui.add(solver, 'height', 2, 8, 1).name('Cube Height');
+        // gui.add(solver, 'depth', 2, 8, 1).name('Cube Depth');
     }
-    undoStack.do(solver.segments = newSegs);
-    solver.initCubes();
-    console.log(newSegs);
+    refreshSolution(){
+        let sols = solver.solve();
+        solution = sols[0];
+        console.log('solution', sols);
+        solver.unfoldSegments();
+        appState.paused = true;
+        appState.place = solver.rotateCubes(solution);
+    }
+    reverseLayout(){
+        undoStack.do([...solver.reverseSegments()]); 
+        solver.initCubes();
+        this.refreshSolution();
+        this.paused = true;
+    }
+    unfoldCubes(){
+        solver.unfoldSegments();
+        this.place=solver.rotateCubes(solver.solutions[0]);
+        this.paused = true;
+    }
+    editLayout(){
+        this.canEdit = true;
+        solver.unfoldSegments();
+        this.paused = true;
+        this.place = solver.rotateCubes(solver.solutions[0]);
+    }
 };
 solver.initCubes();
-showSolution.onclick(null);
 let time = 0;
 let oldNow = 0;
 
-let mousePos = new THREE.Vector3();
+let rawMousePos = new vec3();
+let mousePos = new vec3();
 let mouseCube = new THREE.Mesh(smallCubeGeo);
 mouseCube.visible = false;
 scene.add(mouseCube);
 let targetIndex = -1;
 
 renderer.domElement.onmousemove = (e) => {
-    if(!appState.canEdit) return mouseCube.visible=false;
-    mousePos.set(
+    if(!appState.canEdit || rotator.dragging) return mouseCube.visible=false;
+    rawMousePos.set(
         ( e.clientX / window.innerWidth ) * 2 - 1,
         -(e.clientY / window.innerHeight ) * 2 + 1,
-        1
-    ).unproject(camera);
+        0);
+    mousePos.copy(rawMousePos).setZ(1).unproject(camera);
     //Cast to ground plane
     mousePos.multiplyScalar( (camera.position.y-.5) / -mousePos.y);
     mousePos.x += camera.position.x;
@@ -434,7 +464,6 @@ renderer.domElement.onmousemove = (e) => {
     mouseCube.position.set(mousePos.x, 0, mousePos.z);
 };
 window.addEventListener('keydown', (e) =>{
-
     if(e.ctrlKey || e.metaKey){
         let action: number[];
         switch(e.key){
@@ -449,17 +478,33 @@ window.addEventListener('keydown', (e) =>{
 });
 
 renderer.domElement.addEventListener('mousedown', (e) => {
-    if(e.button !== 0) return;
-    if(targetIndex > 1){
+    if(e.button !== 0 || rotator.dragging) return;
+    if(targetIndex > 1 && appState.canEdit){
         orbitControls.enableRotate = false;
         undoStack.do(solver.generateSegments(targetIndex, mousePos).slice());
         solver.initCubes();
+    } else{
+        raycaster.setFromCamera(rawMousePos, camera);
+        let intersects = raycaster.intersectObjects(solver.cubes);
+        let cubeIndex:number;
+        if(intersects.length>0 && (cubeIndex=solver.cubes.indexOf( intersects[0].object as THREE.Mesh ))>-1){
+            let parentIndex=0;
+            for(let i of solver.segmentHeads){
+                if(i > cubeIndex) break;
+                parentIndex = i;
+            }
+            let cube = solver.cubes[parentIndex];
+            // rotator.rotation.copy(cube.rotation);
+            // rotator.lookAt(cube.getWorldDirection(TEMP_V));
+            rotator.attach(cube);
+        }
     }
 });
 renderer.domElement.addEventListener('mouseup', e => orbitControls.enableRotate = true);
 
 function animate( now: number ) {
     requestAnimationFrame( animate );
+    appState.gui.updateDisplay();
     now *= 0.001;
     let deltaTime = now-oldNow;
     oldNow = now;
@@ -473,3 +518,4 @@ function animate( now: number ) {
 
 
 requestAnimationFrame(animate);
+//kingcube = [2, 1, 2, 1, 1, 3, 1, 2, 1, 2, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 1, 1, 1, 1, 1, 2, 3, 1, 1, 1, 3, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3, 2]
