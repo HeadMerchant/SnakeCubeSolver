@@ -208,7 +208,7 @@ const solver = new class {
                 cubeIndex++;
             }
         }
-        appState.layoutString = this.segments.join(', ');
+        appState.layoutString = this.layoutString();
         appState.canEdit = true;
         renderer.render( scene, camera );
         // rotator.attach(this.cubes[0]);
@@ -381,8 +381,6 @@ const solver = new class {
             [oldPos, oldDir] = [newPos, newDir]
         }
         return (this.segments = newSegs);
-        // TODO
-        // console.log(newSegs.reduce((p, c) => p+c));
     }
     forOfSegment(segmentIndex, fn:(a:THREE.Mesh,b:number)=>void):void{
         let cubeIndex = this.segmentHeads[segmentIndex];
@@ -390,6 +388,9 @@ const solver = new class {
     }
     moveCubes(to:vec3){
         this.cubes[0].position.copy(to);
+    }
+    layoutString(){
+        return this.segments.join(', ');
     }
 }
 
@@ -455,15 +456,24 @@ const appState = new class{
         gui.add(this, 'unfoldCubes').name('Unfold');
         gui.add(this, 'editLayout').name('Edit Layout');
         gui.add(this, 'layoutString').onFinishChange((str)=>{
-            let newSegs = [];
+            let newSegs:number[] = [];
             for(const segSize of str.split(',')){
                 const size = parseInt(segSize);
                 if(isNaN(size)) {
-                    this.error(`Couldn\'t resolve "${segSize}" to a positive integer`); return;
+                    this.layoutString = solver.layoutString();
+                    return this.error(`Couldn\'t resolve layout segment "${segSize}" to a positive integer`);
                 } else if(size < 1){
-                    this.error(`Layout segment ${segSize} is not a positive integer`); return
+                    this.layoutString = solver.layoutString();
+                    return this.error(`Layout segment ${segSize} is not a positive integer`);
                 } else{newSegs.push(size);}
             }
+            const numCubes = newSegs.reduce((s,x)=>s+x, 0);
+            const expectedCubes = solver.width*solver.height*solver.depth;
+            if(numCubes !== expectedCubes){
+                this.layoutString = solver.layoutString();
+                return this.error(`Layout has ${numCubes} cubes; Puzzle requires ${expectedCubes}`);
+            }
+            console.log(`New layout contains ${numCubes} cubes`);
             undoStack.do(solver.segments = newSegs);
             solver.initCubes();
             console.log(newSegs);
