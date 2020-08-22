@@ -214,9 +214,12 @@ const solver = new class {
         // rotator.attach(this.cubes[0]);
     }
     solve() : Solution[]{
-        function solveSegment(pos: vec3, parentDir: vec3, hardBounds: Bounds,
-        occupiedSpaces: SpatialSet, moveList: vec3[], numCubes: number, segments: number[],
-        segmentIndex = 0, startIndex = 0, maxTurns = 4): vec3[] | null{
+        const hardBounds = this.hardBounds;
+        const numCubes = this.cubes.length;
+        const segments = this.segments;
+        let occupiedSpaces: SpatialSet;
+        let moveList: vec3[];
+        function solveSegment(pos: vec3, parentDir: vec3, segmentIndex, startIndex, maxTurns): vec3[] | null{
             let segmentLength = segments[segmentIndex];
             let dir = getOrtho(parentDir);
             let turn = 0;
@@ -236,9 +239,7 @@ const solver = new class {
                 
                 if(segmentCompleted){
                     if(i < numCubes){
-                        let res = solveSegment(newPos, dir.clone(), hardBounds, occupiedSpaces,
-                                    moveList, numCubes, segments,
-                                    segmentIndex+1, i, 4);
+                        let res = solveSegment(newPos, dir.clone(), segmentIndex+1, i, 4);
                         if(res !== null) return res;
                     }else{
                         console.log("%cCube solved", "color: #0f0");
@@ -285,12 +286,12 @@ const solver = new class {
             for(const startDir of startDirs){
                 let testDir = TEMP_V.addVectors(startPos, startDir);
                 if(validZ(testDir.z,maxZ) && validX(testDir.x,dxdz,testDir.z) && validY(testDir.y,dydx,testDir.x)){
-                    let orientations = solveSegment(startPos, getRevOrtho(startDir), this.hardBounds,
-                                    new SpatialSet(this.width, this.height, this.depth), [],
-                                    this.cubes.length, this.segments, 0, 0, 1);
+                    moveList = [];
+                    occupiedSpaces = new SpatialSet(this.width, this.height, this.depth);
+                    let orientations = solveSegment(startPos, getRevOrtho(startDir), 0, 0, 1);
                     if(orientations) solutions.push({orientations, startPos});
                 }
-            } 
+            }
         }}}
         return solutions;
     }
